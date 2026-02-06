@@ -6,6 +6,8 @@ namespace VoiceAgent.AsrMvp.Domain;
 public sealed class SessionContext
 {
     private long _segmentSeq;
+    private readonly object _historyLock = new();
+    private readonly List<AgentTurn> _history = new();
 
     public SessionContext(string sessionId)
     {
@@ -47,5 +49,34 @@ public sealed class SessionContext
     {
         var seq = Interlocked.Increment(ref _segmentSeq);
         return $"seg-{seq}";
+    }
+
+    public void AddUserTurn(string text)
+    {
+        lock (_historyLock)
+        {
+            _history.Add(new AgentTurn("user", text));
+        }
+    }
+
+    public void AddAssistantTurn(string text)
+    {
+        lock (_historyLock)
+        {
+            _history.Add(new AgentTurn("assistant", text));
+        }
+    }
+
+    public IReadOnlyList<AgentTurn> GetHistoryWindow(int maxTurns)
+    {
+        lock (_historyLock)
+        {
+            if (maxTurns <= 0 || _history.Count <= maxTurns)
+            {
+                return _history.ToList();
+            }
+
+            return _history.Skip(_history.Count - maxTurns).ToList();
+        }
     }
 }

@@ -7,6 +7,8 @@ This is the phase-1 MVP service for real-time transcription.
 - Binary PCM16 audio input (16k mono expected)
 - Endpointing state machine (`end_silence`, `min_segment`, `max_segment`, `merge_back`)
 - `stt.partial` and `stt.final` events
+- `agent.response` event triggered by each `stt.final`
+- `tts.start/chunk/stop` events plus binary PCM16 audio chunks
 - `listen.stop` text control to force finalization
 
 ## Run
@@ -30,4 +32,14 @@ curl http://127.0.0.1:5079/healthz
 ```
 ```json
 {"type":"stt","state":"final","text":"...","segmentId":"seg-1","sessionId":"...","startMs":0,"endMs":2560}
+```
+```json
+{"type":"agent","state":"response","text":"...","sessionId":"...","segmentId":"seg-1"}
+```
+```json
+{"type":"tts","state":"start","sessionId":"...","segmentId":"seg-1","sampleRate":16000,"sequence":0}
+```
+Binary websocket frames after `tts.start` are PCM16 audio chunks, followed by:
+```json
+{"type":"tts","state":"stop","sessionId":"...","segmentId":"seg-1","sampleRate":16000,"sequence":N}
 ```

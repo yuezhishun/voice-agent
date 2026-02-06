@@ -15,6 +15,8 @@ builder.Services.Configure<AsrMvpOptions>(builder.Configuration.GetSection(AsrMv
 builder.Services.AddSingleton<IAudioDecoder, Pcm16AudioDecoder>();
 builder.Services.AddSingleton<IEnergyVad, EnergyVad>();
 builder.Services.AddSingleton<IStreamingAsrEngine, MockParaformerStreamingEngine>();
+builder.Services.AddSingleton<IAgentEngine, MockAgentEngine>();
+builder.Services.AddSingleton<ITtsEngine, MockTtsEngine>();
 builder.Services.AddSingleton<EndpointingEngine>();
 builder.Services.AddSingleton<TranscriptStabilizer>();
 
@@ -48,6 +50,8 @@ app.Map("/ws/stt", async context =>
     var vad = context.RequestServices.GetRequiredService<IEnergyVad>();
     var endpointing = context.RequestServices.GetRequiredService<EndpointingEngine>();
     var asr = context.RequestServices.GetRequiredService<IStreamingAsrEngine>();
+    var agent = context.RequestServices.GetRequiredService<IAgentEngine>();
+    var tts = context.RequestServices.GetRequiredService<ITtsEngine>();
     var stabilizer = context.RequestServices.GetRequiredService<TranscriptStabilizer>();
     var logger = context.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("SttSocket");
 
@@ -76,7 +80,7 @@ app.Map("/ws/stt", async context =>
 
             if (message.MessageType == WebSocketMessageType.Text)
             {
-                await HandleControlTextAsync(socket, session, message.Payload, jsonOptions, asr, logger, context.RequestAborted);
+                await HandleControlTextAsync(socket, session, message.Payload, jsonOptions, asr, agent, tts, options, logger, context.RequestAborted);
                 continue;
             }
 
@@ -133,16 +137,18 @@ app.Map("/ws/stt", async context =>
 
                 if (!string.IsNullOrWhiteSpace(finalText))
                 {
+                    var segmentId = session.ActiveSegmentId ?? session.NextSegmentId();
                     var finalMessage = new SttMessage(
                         Type: "stt",
                         State: "final",
                         Text: finalText,
-                        SegmentId: session.ActiveSegmentId ?? session.NextSegmentId(),
+                        SegmentId: segmentId,
                         SessionId: session.SessionId,
                         StartMs: decision.SegmentStartMs,
                         EndMs: decision.SegmentEndMs);
 
                     await SendJsonAsync(socket, finalMessage, jsonOptions, context.RequestAborted);
+                    await SendAgentResponseAsync(socket, session, segmentId, finalText, agent, tts, options, jsonOptions, logger, context.RequestAborted);
                 }
 
                 session.ActiveSegmentId = null;
@@ -185,6 +191,10 @@ app.Map("/ws/stt", async context =>
             {
                 // Remote endpoint may already be closed.
             }
+            catch (IOException)
+            {
+                // Test host may close the transport before close handshake completes.
+            }
             catch (ObjectDisposedException)
             {
                 // Test host websocket can be disposed by the client side.
@@ -203,6 +213,9 @@ static async Task HandleControlTextAsync(
     byte[] payload,
     JsonSerializerOptions jsonOptions,
     IStreamingAsrEngine asr,
+    IAgentEngine agent,
+    ITtsEngine tts,
+    AsrMvpOptions options,
     ILogger logger,
     CancellationToken cancellationToken)
 {
@@ -243,16 +256,18 @@ static async Task HandleControlTextAsync(
     }
 
     var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+    var segmentId = session.ActiveSegmentId ?? session.NextSegmentId();
     var finalMessage = new SttMessage(
         Type: "stt",
         State: "final",
         Text: finalText,
-        SegmentId: session.ActiveSegmentId ?? session.NextSegmentId(),
+        SegmentId: segmentId,
         SessionId: session.SessionId,
         StartMs: session.Endpointing.SegmentStartMs,
         EndMs: nowMs);
 
     await SendJsonAsync(socket, finalMessage, jsonOptions, cancellationToken);
+    await SendAgentResponseAsync(socket, session, segmentId, finalText, agent, tts, options, jsonOptions, logger, cancellationToken);
 
     session.Endpointing.Reset();
     session.ActiveSegmentId = null;
@@ -260,6 +275,124 @@ static async Task HandleControlTextAsync(
     session.Transcript.LastPartialSentAtMs = 0;
 
     logger.LogDebug("Session {SessionId} finalized by manual stop", session.SessionId);
+}
+
+static async Task SendAgentResponseAsync(
+    WebSocket socket,
+    SessionContext session,
+    string segmentId,
+    string finalText,
+    IAgentEngine agent,
+    ITtsEngine tts,
+    AsrMvpOptions options,
+    JsonSerializerOptions jsonOptions,
+    ILogger logger,
+    CancellationToken cancellationToken)
+{
+    session.AddUserTurn(finalText);
+    var history = session.GetHistoryWindow(options.Agent.MaxHistoryTurns);
+
+    try
+    {
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(options.Agent.TimeoutMs);
+        var reply = await agent.GenerateReplyAsync(
+            session.SessionId,
+            options.Agent.SystemPrompt,
+            history,
+            finalText,
+            timeoutCts.Token);
+
+        if (string.IsNullOrWhiteSpace(reply))
+        {
+            return;
+        }
+
+        session.AddAssistantTurn(reply);
+        var agentMessage = new AgentMessage(
+            Type: "agent",
+            State: "response",
+            Text: reply,
+            SessionId: session.SessionId,
+            SegmentId: segmentId);
+
+        await SendJsonAsync(socket, agentMessage, jsonOptions, cancellationToken);
+        await SendTtsOutputAsync(socket, session.SessionId, segmentId, reply, tts, options, jsonOptions, logger, cancellationToken);
+    }
+    catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+    {
+        await SendErrorAsync(socket, session.SessionId, "AGENT_TIMEOUT", "Agent response timed out", jsonOptions, cancellationToken);
+    }
+    catch (Exception ex)
+    {
+        logger.LogWarning(ex, "Session {SessionId} agent generation failed", session.SessionId);
+        await SendErrorAsync(socket, session.SessionId, "AGENT_PROVIDER_ERROR", ex.Message, jsonOptions, cancellationToken);
+    }
+}
+
+static async Task SendTtsOutputAsync(
+    WebSocket socket,
+    string sessionId,
+    string segmentId,
+    string text,
+    ITtsEngine tts,
+    AsrMvpOptions options,
+    JsonSerializerOptions jsonOptions,
+    ILogger logger,
+    CancellationToken cancellationToken)
+{
+    try
+    {
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(options.Tts.TimeoutMs);
+
+        var start = new TtsMessage(
+            Type: "tts",
+            State: "start",
+            SessionId: sessionId,
+            SegmentId: segmentId,
+            SampleRate: options.Tts.SampleRate,
+            Sequence: 0);
+        await SendJsonAsync(socket, start, jsonOptions, cancellationToken);
+
+        var seq = 0;
+        await foreach (var chunk in tts.SynthesizePcm16Async(sessionId, text, options.Tts.SampleRate, options.Tts.ChunkDurationMs, timeoutCts.Token))
+        {
+            if (socket.State != WebSocketState.Open)
+            {
+                return;
+            }
+
+            seq++;
+            await socket.SendAsync(chunk, WebSocketMessageType.Binary, true, cancellationToken);
+            var chunkMeta = new TtsMessage(
+                Type: "tts",
+                State: "chunk",
+                SessionId: sessionId,
+                SegmentId: segmentId,
+                SampleRate: options.Tts.SampleRate,
+                Sequence: seq);
+            await SendJsonAsync(socket, chunkMeta, jsonOptions, cancellationToken);
+        }
+
+        var stop = new TtsMessage(
+            Type: "tts",
+            State: "stop",
+            SessionId: sessionId,
+            SegmentId: segmentId,
+            SampleRate: options.Tts.SampleRate,
+            Sequence: seq);
+        await SendJsonAsync(socket, stop, jsonOptions, cancellationToken);
+    }
+    catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+    {
+        await SendErrorAsync(socket, sessionId, "TTS_TIMEOUT", "TTS timed out", jsonOptions, cancellationToken);
+    }
+    catch (Exception ex)
+    {
+        logger.LogWarning(ex, "Session {SessionId} tts generation failed", sessionId);
+        await SendErrorAsync(socket, sessionId, "TTS_PROVIDER_ERROR", ex.Message, jsonOptions, cancellationToken);
+    }
 }
 
 static async Task SendErrorAsync(

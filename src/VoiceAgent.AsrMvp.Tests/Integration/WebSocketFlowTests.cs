@@ -49,14 +49,23 @@ public sealed class WebSocketFlowTests : IClassFixture<WebApplicationFactory<Pro
 
         var partial = 0;
         var final = 0;
+        var agent = 0;
+        var ttsStart = 0;
+        var ttsStop = 0;
+        var ttsBinary = 0;
 
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(8));
         for (var i = 0; i < 40; i++)
         {
             var buffer = new byte[8192];
             var result = await ws.ReceiveAsync(buffer, timeout.Token);
-            if (result.MessageType != WebSocketMessageType.Text)
+            if (result.MessageType == WebSocketMessageType.Binary)
             {
+                ttsBinary++;
+                if (final >= 1 && agent >= 1 && ttsStart >= 1 && ttsStop >= 1 && ttsBinary >= 1)
+                {
+                    break;
+                }
                 continue;
             }
 
@@ -69,11 +78,37 @@ public sealed class WebSocketFlowTests : IClassFixture<WebApplicationFactory<Pro
             if (text.Contains("\"state\":\"final\"", StringComparison.Ordinal))
             {
                 final++;
+            }
+
+            if (text.Contains("\"type\":\"agent\"", StringComparison.Ordinal) &&
+                text.Contains("\"state\":\"response\"", StringComparison.Ordinal))
+            {
+                agent++;
+            }
+
+            if (text.Contains("\"type\":\"tts\"", StringComparison.Ordinal) &&
+                text.Contains("\"state\":\"start\"", StringComparison.Ordinal))
+            {
+                ttsStart++;
+            }
+
+            if (text.Contains("\"type\":\"tts\"", StringComparison.Ordinal) &&
+                text.Contains("\"state\":\"stop\"", StringComparison.Ordinal))
+            {
+                ttsStop++;
+            }
+
+            if (final >= 1 && agent >= 1 && ttsStart >= 1 && ttsStop >= 1 && ttsBinary >= 1)
+            {
                 break;
             }
         }
 
         Assert.True(partial >= 1, "Expected at least one partial message.");
         Assert.True(final >= 1, "Expected one final message.");
+        Assert.True(agent >= 1, "Expected one agent response message.");
+        Assert.True(ttsStart >= 1, "Expected tts start message.");
+        Assert.True(ttsBinary >= 1, "Expected at least one binary tts chunk.");
+        Assert.True(ttsStop >= 1, "Expected tts stop message.");
     }
 }
