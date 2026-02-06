@@ -42,7 +42,15 @@ else
 {
     builder.Services.AddSingleton<IAgentEngine, MockAgentEngine>();
 }
-builder.Services.AddSingleton<ITtsEngine, MockTtsEngine>();
+var ttsProvider = builder.Configuration[$"{AsrMvpOptions.SectionName}:Tts:Provider"] ?? "mock";
+if (string.Equals(ttsProvider, "kokoro", StringComparison.OrdinalIgnoreCase))
+{
+    builder.Services.AddSingleton<ITtsEngine, KokoroTtsEngine>();
+}
+else
+{
+    builder.Services.AddSingleton<ITtsEngine, MockTtsEngine>();
+}
 builder.Services.AddSingleton<EndpointingEngine>();
 builder.Services.AddSingleton<TranscriptStabilizer>();
 builder.Services.AddSingleton<AsrFileProcessor>();

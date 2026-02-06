@@ -44,6 +44,17 @@ dotnet run --project src/VoiceAgent.AsrMvp/VoiceAgent.AsrMvp.csproj \
   --AsrMvp:Agent:OpenAiCompatible:Model=glm-4.7
 ```
 
+To use local Kokoro TTS instead of mock, set:
+- `AsrMvp:Tts:Provider=kokoro`
+- `AsrMvp:Tts:Kokoro:ModelDir=models/kokoro-v1.0`
+
+Kokoro model directory should include:
+- `model.onnx`
+- `voices.bin`
+- `tokens.txt`
+- `espeak-ng-data/`
+- `dict/`
+
 ## Health
 ```bash
 curl http://127.0.0.1:5079/healthz
@@ -96,3 +107,9 @@ export REAL_PARAFORMER_MODEL_DIR=/home/yueyuan/voice-agent/models/paraformer-onl
 dotnet test src/VoiceAgent.AsrMvp.Tests/VoiceAgent.AsrMvp.Tests.csproj --filter RealWavBatchManySpeechTests
 ```
 Per-file report is written to `/tmp/voice-agent-reports/real_wav_asr_manyspeech_report_*.txt`.
+
+Optional real Kokoro TTS test:
+```bash
+export KOKORO_MODEL_DIR=/path/to/kokoro-v1.0
+dotnet test src/VoiceAgent.AsrMvp.Tests/VoiceAgent.AsrMvp.Tests.csproj --filter RealKokoroTtsTests
+```

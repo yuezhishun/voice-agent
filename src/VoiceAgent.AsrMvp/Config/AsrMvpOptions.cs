@@ -65,7 +65,19 @@ public sealed class OpenAiCompatibleAgentOptions
 
 public sealed class TtsOptions
 {
+    public string Provider { get; set; } = "mock";
     public int SampleRate { get; set; } = 16000;
     public int TimeoutMs { get; set; } = 3000;
     public int ChunkDurationMs { get; set; } = 200;
+    public KokoroTtsOptions Kokoro { get; set; } = new();
+}
+
+public sealed class KokoroTtsOptions
+{
+    public string ModelDir { get; set; } = "models/kokoro-v1.0";
+    public string? Lexicon { get; set; }
+    public string Provider { get; set; } = "cpu";
+    public int NumThreads { get; set; } = 2;
+    public float Speed { get; set; } = 1.0f;
+    public int SpeakerId { get; set; } = 50;
 }
