@@ -113,3 +113,12 @@ Optional real Kokoro TTS test:
 export KOKORO_MODEL_DIR=/path/to/kokoro-v1.0
 dotnet test src/VoiceAgent.AsrMvp.Tests/VoiceAgent.AsrMvp.Tests.csproj --filter RealKokoroTtsTests
 ```
+
+Optional real end-to-end test (ManySpeech ASR + GLM Agent + Kokoro TTS):
+```bash
+export REAL_E2E_WAV_FILE=/path/to/16k_pcm16_mono.wav
+export REAL_PARAFORMER_MODEL_DIR=/home/yueyuan/voice-agent/models/paraformer-online-onnx
+export KOKORO_MODEL_DIR=/home/yueyuan/voice-agent/models/kokoro-multi-lang-v1_0
+export GLM_API_KEY=your_key
+dotnet test src/VoiceAgent.AsrMvp.Tests/VoiceAgent.AsrMvp.Tests.csproj --filter RealEndToEndFlowTests
+```
