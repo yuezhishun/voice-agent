@@ -47,9 +47,20 @@ public sealed class EndpointingOptions
 
 public sealed class AgentOptions
 {
+    public string Provider { get; set; } = "mock";
     public int MaxHistoryTurns { get; set; } = 8;
     public int TimeoutMs { get; set; } = 3000;
     public string SystemPrompt { get; set; } = "You are a concise helpful assistant for voice conversation.";
+    public OpenAiCompatibleAgentOptions OpenAiCompatible { get; set; } = new();
+}
+
+public sealed class OpenAiCompatibleAgentOptions
+{
+    public string BaseUrl { get; set; } = "https://open.bigmodel.cn/api/paas/v4/";
+    public string ApiKey { get; set; } = string.Empty;
+    public string Model { get; set; } = "glm-4.7";
+    public float Temperature { get; set; } = 0.7f;
+    public int? MaxTokens { get; set; }
 }
 
 public sealed class TtsOptions

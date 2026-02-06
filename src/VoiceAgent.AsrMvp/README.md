@@ -29,6 +29,21 @@ To use local Paraformer ONNX (ManySpeech) instead of mock, set:
 
 The engine auto-generates `tokens.txt` from `tokens.json` when needed.
 
+To use real GLM agent (OpenAI-compatible API), set:
+- `AsrMvp:Agent:Provider=openai`
+- `AsrMvp:Agent:OpenAiCompatible:BaseUrl=https://open.bigmodel.cn/api/paas/v4/`
+- `AsrMvp:Agent:OpenAiCompatible:Model=glm-4.7`
+- API key from env `GLM_API_KEY` (recommended) or config `AsrMvp:Agent:OpenAiCompatible:ApiKey`
+
+Example:
+```bash
+export GLM_API_KEY=your_key
+dotnet run --project src/VoiceAgent.AsrMvp/VoiceAgent.AsrMvp.csproj \
+  --urls http://127.0.0.1:5079 \
+  --AsrMvp:Agent:Provider=openai \
+  --AsrMvp:Agent:OpenAiCompatible:Model=glm-4.7
+```
+
 ## Health
 ```bash
 curl http://127.0.0.1:5079/healthz

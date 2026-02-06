@@ -12,6 +12,7 @@ using VoiceAgent.AsrMvp.Services;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.Configure<AsrMvpOptions>(builder.Configuration.GetSection(AsrMvpOptions.SectionName));
+builder.Services.AddHttpClient();
 builder.Services.AddSingleton<IAudioDecoder, Pcm16AudioDecoder>();
 builder.Services.AddSingleton<IAudioPreprocessor, BasicAudioPreprocessor>();
 builder.Services.AddSingleton<IAudioClassifier, BasicAudioClassifier>();
@@ -30,7 +31,17 @@ else
 {
     builder.Services.AddSingleton<IStreamingAsrEngine, MockParaformerStreamingEngine>();
 }
-builder.Services.AddSingleton<IAgentEngine, MockAgentEngine>();
+var agentProvider = builder.Configuration[$"{AsrMvpOptions.SectionName}:Agent:Provider"] ?? "mock";
+if (string.Equals(agentProvider, "openai", StringComparison.OrdinalIgnoreCase) ||
+    string.Equals(agentProvider, "openai-compatible", StringComparison.OrdinalIgnoreCase) ||
+    string.Equals(agentProvider, "glm", StringComparison.OrdinalIgnoreCase))
+{
+    builder.Services.AddSingleton<IAgentEngine, OpenAiCompatibleAgentEngine>();
+}
+else
+{
+    builder.Services.AddSingleton<IAgentEngine, MockAgentEngine>();
+}
 builder.Services.AddSingleton<ITtsEngine, MockTtsEngine>();
 builder.Services.AddSingleton<EndpointingEngine>();
 builder.Services.AddSingleton<TranscriptStabilizer>();
