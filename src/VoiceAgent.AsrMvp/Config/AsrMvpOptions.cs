@@ -8,11 +8,48 @@ public sealed class AsrMvpOptions
     public int SampleRate { get; set; } = 16000;
     public int ChunkMs { get; set; } = 320;
     public int TailRollbackSeconds { get; set; } = 2;
+    public AudioProcessingOptions AudioProcessing { get; set; } = new();
     public FunAsrWebSocketOptions FunAsrWebSocket { get; set; } = new();
     public ManySpeechParaformerOptions ManySpeechParaformer { get; set; } = new();
     public EndpointingOptions Endpointing { get; set; } = new();
+    public TwoPassOptions TwoPass { get; set; } = new();
+    public PostProcessOptions PostProcess { get; set; } = new();
+    public MetricsOptions Metrics { get; set; } = new();
     public AgentOptions Agent { get; set; } = new();
     public TtsOptions Tts { get; set; } = new();
+}
+
+public sealed class TwoPassOptions
+{
+    public bool Enabled { get; set; } = false;
+    public string Provider { get; set; } = "sensevoice";
+    public int WindowSeconds { get; set; } = 12;
+    public int WindowSegments { get; set; } = 3;
+    public bool PrefixLockEnabled { get; set; } = true;
+    public SenseVoiceOfflineOptions SenseVoice { get; set; } = new();
+}
+
+public sealed class SenseVoiceOfflineOptions
+{
+    public string ModelDir { get; set; } = "models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17";
+    public string ModelFile { get; set; } = "model.int8.onnx";
+    public string Language { get; set; } = "zh";
+    public bool UseInverseTextNormalization { get; set; } = true;
+    public int NumThreads { get; set; } = 2;
+    public string Provider { get; set; } = "cpu";
+}
+
+public sealed class AudioProcessingOptions
+{
+    public bool EnableDenoise { get; set; } = true;
+    public bool EnableAgc { get; set; } = true;
+    public bool EnableDcRemoval { get; set; } = true;
+    public bool EnablePreEmphasis { get; set; } = true;
+    public float AgcTargetRms { get; set; } = 0.12f;
+    public float AgcMaxGain { get; set; } = 6.0f;
+    public float NoiseFloorAlpha { get; set; } = 0.98f;
+    public float NoiseSuppressStrength { get; set; } = 0.65f;
+    public float PreEmphasis { get; set; } = 0.97f;
 }
 
 public sealed class FunAsrWebSocketOptions
@@ -43,6 +80,21 @@ public sealed class EndpointingOptions
     public int MergeBackMs { get; set; } = 300;
     public int MaxSegmentMs { get; set; } = 15000;
     public float EnergyThreshold { get; set; } = 0.012f;
+    public bool AdaptiveVadEnabled { get; set; } = true;
+    public float AdaptiveVadFloor { get; set; } = 0.004f;
+    public float AdaptiveVadMultiplier { get; set; } = 2.2f;
+    public int AdaptiveVadWindowFrames { get; set; } = 40;
+}
+
+public sealed class PostProcessOptions
+{
+    public bool EnablePunctuation { get; set; } = true;
+    public bool EnableNormalization { get; set; } = true;
+}
+
+public sealed class MetricsOptions
+{
+    public bool Enabled { get; set; } = true;
 }
 
 public sealed class AgentOptions

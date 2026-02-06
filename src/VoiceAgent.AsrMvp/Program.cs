@@ -53,6 +53,18 @@ else
 }
 builder.Services.AddSingleton<EndpointingEngine>();
 builder.Services.AddSingleton<TranscriptStabilizer>();
+builder.Services.AddSingleton<TranscriptPostProcessor>();
+builder.Services.AddSingleton<AsrPipelineMetrics>();
+var twoPassEnabled = string.Equals(builder.Configuration[$"{AsrMvpOptions.SectionName}:TwoPass:Enabled"], "true", StringComparison.OrdinalIgnoreCase);
+var twoPassProvider = builder.Configuration[$"{AsrMvpOptions.SectionName}:TwoPass:Provider"] ?? "sensevoice";
+if (twoPassEnabled && string.Equals(twoPassProvider, "sensevoice", StringComparison.OrdinalIgnoreCase))
+{
+    builder.Services.AddSingleton<ITwoPassRefiner, SenseVoiceTwoPassRefiner>();
+}
+else
+{
+    builder.Services.AddSingleton<ITwoPassRefiner, NoopTwoPassRefiner>();
+}
 builder.Services.AddSingleton<AsrFileProcessor>();
 
 var app = builder.Build();
@@ -70,6 +82,7 @@ app.UseWebSockets(new WebSocketOptions
 });
 
 app.MapGet("/healthz", () => Results.Ok(new { status = "ok" }));
+app.MapGet("/metrics", (AsrPipelineMetrics metrics) => Results.Content(metrics.SnapshotJson(), "application/json"));
 
 app.Map("/ws/stt", async context =>
 {
@@ -91,6 +104,9 @@ app.Map("/ws/stt", async context =>
     var agent = context.RequestServices.GetRequiredService<IAgentEngine>();
     var tts = context.RequestServices.GetRequiredService<ITtsEngine>();
     var stabilizer = context.RequestServices.GetRequiredService<TranscriptStabilizer>();
+    var postProcessor = context.RequestServices.GetRequiredService<TranscriptPostProcessor>();
+    var metrics = context.RequestServices.GetRequiredService<AsrPipelineMetrics>();
+    var twoPassRefiner = context.RequestServices.GetRequiredService<ITwoPassRefiner>();
     var logger = context.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("SttSocket");
 
     using var socket = await context.WebSockets.AcceptWebSocketAsync();
@@ -98,6 +114,7 @@ app.Map("/ws/stt", async context =>
     var sessionId = Guid.NewGuid().ToString("N");
     var session = new SessionContext(sessionId);
     sessions[sessionId] = session;
+    metrics.OnSessionOpened(sessionId);
 
     logger.LogInformation("Session {SessionId} connected", sessionId);
 
@@ -118,7 +135,7 @@ app.Map("/ws/stt", async context =>
 
             if (message.MessageType == WebSocketMessageType.Text)
             {
-                await HandleControlTextAsync(socket, session, message.Payload, jsonOptions, asr, agent, tts, options, logger, context.RequestAborted);
+                await HandleControlTextAsync(socket, session, message.Payload, jsonOptions, asr, agent, tts, postProcessor, metrics, twoPassRefiner, options, logger, context.RequestAborted);
                 continue;
             }
 
@@ -145,6 +162,7 @@ app.Map("/ws/stt", async context =>
             }
 
             var chunkMs = Math.Max(1, (int)Math.Round(preprocessed.Samples.Length * 1000.0 / options.SampleRate));
+            metrics.OnChunkProcessed(session.SessionId, chunkMs);
             var speech = audioKind == AudioKind.Speech &&
                          qualityChecker.IsAcceptable(preprocessed) &&
                          vad.IsSpeech(preprocessed.Samples);
@@ -159,12 +177,13 @@ app.Map("/ws/stt", async context =>
             if (decision.InSpeech)
             {
                 var partialTextRaw = await asr.DecodePartialAsync(session.SessionId, session.SnapshotSegment(), context.RequestAborted);
-                var partialText = stabilizer.Stabilize(session.Transcript.LastPartial, partialTextRaw);
+                var partialText = stabilizer.Stabilize(session.Transcript.LastPartial, postProcessor.ProcessPartial(partialTextRaw));
 
                 if (!string.IsNullOrWhiteSpace(partialText) && !string.Equals(partialText, session.Transcript.LastPartial, StringComparison.Ordinal))
                 {
                     session.Transcript.LastPartial = partialText;
                     session.Transcript.LastPartialSentAtMs = nowMs;
+                    metrics.OnPartial();
 
                     var partialMessage = new SttMessage(
                         Type: "stt",
@@ -181,11 +200,21 @@ app.Map("/ws/stt", async context =>
 
             if (decision.ShouldFinalize && decision.FinalSegmentSamples is { Length: > 0 })
             {
-                var finalText = await asr.DecodeFinalAsync(session.SessionId, decision.FinalSegmentSamples, context.RequestAborted);
+                var finalRaw = await asr.DecodeFinalAsync(session.SessionId, decision.FinalSegmentSamples, context.RequestAborted);
+                var finalText = postProcessor.Process(finalRaw);
 
                 if (!string.IsNullOrWhiteSpace(finalText))
                 {
                     var segmentId = session.ActiveSegmentId ?? session.NextSegmentId();
+                    finalText = await twoPassRefiner.RefineFinalAsync(
+                        session.SessionId,
+                        segmentId,
+                        finalText,
+                        decision.FinalSegmentSamples,
+                        options.SampleRate,
+                        context.RequestAborted);
+                    finalText = postProcessor.Process(finalText);
+                    metrics.OnFinal(session.SessionId);
                     var finalMessage = new SttMessage(
                         Type: "stt",
                         State: "final",
@@ -224,6 +253,7 @@ app.Map("/ws/stt", async context =>
     catch (Exception ex)
     {
         logger.LogError(ex, "Session {SessionId} failed", sessionId);
+        metrics.OnError();
         var sent = await SendErrorAsync(socket, sessionId, "INTERNAL_ERROR", ex.Message, jsonOptions, context.RequestAborted);
         if (!sent)
         {
@@ -233,6 +263,8 @@ app.Map("/ws/stt", async context =>
     finally
     {
         sessions.TryRemove(sessionId, out _);
+        twoPassRefiner.ResetSession(sessionId);
+        metrics.OnSessionClosed(sessionId);
         if (socket.State == WebSocketState.Open || socket.State == WebSocketState.CloseReceived)
         {
             try
@@ -267,6 +299,9 @@ static async Task HandleControlTextAsync(
     IStreamingAsrEngine asr,
     IAgentEngine agent,
     ITtsEngine tts,
+    TranscriptPostProcessor postProcessor,
+    AsrPipelineMetrics metrics,
+    ITwoPassRefiner twoPassRefiner,
     AsrMvpOptions options,
     ILogger logger,
     CancellationToken cancellationToken)
@@ -300,15 +335,25 @@ static async Task HandleControlTextAsync(
         return;
     }
 
-    var finalText = await asr.DecodeFinalAsync(session.SessionId, samples, cancellationToken);
+    var finalRaw = await asr.DecodeFinalAsync(session.SessionId, samples, cancellationToken);
+    var finalText = postProcessor.Process(finalRaw);
     if (string.IsNullOrWhiteSpace(finalText))
     {
         session.Endpointing.Reset();
         return;
     }
+    var segmentId = session.ActiveSegmentId ?? session.NextSegmentId();
+    finalText = await twoPassRefiner.RefineFinalAsync(
+        session.SessionId,
+        segmentId,
+        finalText,
+        samples,
+        options.SampleRate,
+        cancellationToken);
+    finalText = postProcessor.Process(finalText);
+    metrics.OnFinal(session.SessionId);
 
     var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-    var segmentId = session.ActiveSegmentId ?? session.NextSegmentId();
     var finalMessage = new SttMessage(
         Type: "stt",
         State: "final",

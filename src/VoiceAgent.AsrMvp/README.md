@@ -6,8 +6,11 @@ This is the phase-1 MVP service for real-time transcription.
 - WebSocket ingest (`/ws/stt`)
 - Binary PCM16 audio input (16k mono expected)
 - ASR processing chain: preprocess -> classify -> quality check -> VAD -> endpointing
+- Enhanced audio preprocess: DC removal + pre-emphasis + noise suppression + AGC
 - Endpointing state machine (`end_silence`, `min_segment`, `max_segment`, `merge_back`)
 - `stt.partial` and `stt.final` events
+- Transcript post-process: normalization + punctuation restore
+- Optional 2-pass final revision: SenseVoice offline windowed refine + prefix lock
 - `agent.response` event triggered by each `stt.final`
 - `tts.start/chunk/stop` events plus binary PCM16 audio chunks
 - `listen.stop` text control to force finalization
@@ -58,6 +61,11 @@ Kokoro model directory should include:
 ## Health
 ```bash
 curl http://127.0.0.1:5079/healthz
+```
+
+## Metrics
+```bash
+curl http://127.0.0.1:5079/metrics
 ```
 
 ## WebSocket
@@ -121,4 +129,28 @@ export REAL_PARAFORMER_MODEL_DIR=/home/yueyuan/voice-agent/models/paraformer-onl
 export KOKORO_MODEL_DIR=/home/yueyuan/voice-agent/models/kokoro-multi-lang-v1_0
 export GLM_API_KEY=your_key
 dotnet test src/VoiceAgent.AsrMvp.Tests/VoiceAgent.AsrMvp.Tests.csproj --filter RealEndToEndFlowTests
+```
+
+Enable 2-pass with SenseVoice offline model:
+```bash
+dotnet run --project src/VoiceAgent.AsrMvp/VoiceAgent.AsrMvp.csproj \
+  --AsrMvp:TwoPass:Enabled=true \
+  --AsrMvp:TwoPass:Provider=sensevoice \
+  --AsrMvp:TwoPass:SenseVoice:ModelDir=/home/yueyuan/voice-agent/models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17 \
+  --AsrMvp:TwoPass:WindowSeconds=12 \
+  --AsrMvp:TwoPass:WindowSegments=3
+```
+
+SenseVoice model download (sherpa-onnx release):
+```bash
+cd models
+curl -L -o sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2 \
+  https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2
+tar -xjf sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2
+```
+
+Optional real 2-pass test:
+```bash
+export REAL_SENSEVOICE_MODEL_DIR=/home/yueyuan/voice-agent/models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17
+dotnet test src/VoiceAgent.AsrMvp.Tests/VoiceAgent.AsrMvp.Tests.csproj --filter RealSenseVoiceTwoPassTests
 ```
