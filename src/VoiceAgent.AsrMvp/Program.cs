@@ -13,12 +13,28 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.Configure<AsrMvpOptions>(builder.Configuration.GetSection(AsrMvpOptions.SectionName));
 builder.Services.AddSingleton<IAudioDecoder, Pcm16AudioDecoder>();
+builder.Services.AddSingleton<IAudioPreprocessor, BasicAudioPreprocessor>();
+builder.Services.AddSingleton<IAudioClassifier, BasicAudioClassifier>();
+builder.Services.AddSingleton<IAudioQualityChecker, BasicAudioQualityChecker>();
 builder.Services.AddSingleton<IEnergyVad, EnergyVad>();
-builder.Services.AddSingleton<IStreamingAsrEngine, MockParaformerStreamingEngine>();
+var asrProvider = builder.Configuration[$"{AsrMvpOptions.SectionName}:AsrProvider"] ?? "mock";
+if (string.Equals(asrProvider, "funasr", StringComparison.OrdinalIgnoreCase))
+{
+    builder.Services.AddSingleton<IStreamingAsrEngine, FunAsrWebSocketStreamingEngine>();
+}
+else if (string.Equals(asrProvider, "manyspeech", StringComparison.OrdinalIgnoreCase))
+{
+    builder.Services.AddSingleton<IStreamingAsrEngine, ManySpeechParaformerOnlineEngine>();
+}
+else
+{
+    builder.Services.AddSingleton<IStreamingAsrEngine, MockParaformerStreamingEngine>();
+}
 builder.Services.AddSingleton<IAgentEngine, MockAgentEngine>();
 builder.Services.AddSingleton<ITtsEngine, MockTtsEngine>();
 builder.Services.AddSingleton<EndpointingEngine>();
 builder.Services.AddSingleton<TranscriptStabilizer>();
+builder.Services.AddSingleton<AsrFileProcessor>();
 
 var app = builder.Build();
 
@@ -47,6 +63,9 @@ app.Map("/ws/stt", async context =>
 
     var options = context.RequestServices.GetRequiredService<IOptions<AsrMvpOptions>>().Value;
     var decoder = context.RequestServices.GetRequiredService<IAudioDecoder>();
+    var preprocessor = context.RequestServices.GetRequiredService<IAudioPreprocessor>();
+    var classifier = context.RequestServices.GetRequiredService<IAudioClassifier>();
+    var qualityChecker = context.RequestServices.GetRequiredService<IAudioQualityChecker>();
     var vad = context.RequestServices.GetRequiredService<IEnergyVad>();
     var endpointing = context.RequestServices.GetRequiredService<EndpointingEngine>();
     var asr = context.RequestServices.GetRequiredService<IStreamingAsrEngine>();
@@ -98,10 +117,20 @@ app.Map("/ws/stt", async context =>
 
             var wasInSpeech = session.Endpointing.InSpeech;
             var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-            var chunkMs = Math.Max(1, (int)Math.Round(pcm.Length * 1000.0 / options.SampleRate));
-            var speech = vad.IsSpeech(pcm);
+            var preprocessed = preprocessor.Process(pcm);
+            var audioKind = classifier.Classify(preprocessed);
 
-            var decision = endpointing.Process(session, pcm, speech, chunkMs, nowMs);
+            if (audioKind == AudioKind.NonSpeech && !wasInSpeech)
+            {
+                continue;
+            }
+
+            var chunkMs = Math.Max(1, (int)Math.Round(preprocessed.Samples.Length * 1000.0 / options.SampleRate));
+            var speech = audioKind == AudioKind.Speech &&
+                         qualityChecker.IsAcceptable(preprocessed) &&
+                         vad.IsSpeech(preprocessed.Samples);
+
+            var decision = endpointing.Process(session, preprocessed.Samples, speech, chunkMs, nowMs);
 
             if (!wasInSpeech && decision.InSpeech)
             {
@@ -176,7 +205,11 @@ app.Map("/ws/stt", async context =>
     catch (Exception ex)
     {
         logger.LogError(ex, "Session {SessionId} failed", sessionId);
-        await SendErrorAsync(socket, sessionId, "INTERNAL_ERROR", ex.Message, jsonOptions, context.RequestAborted);
+        var sent = await SendErrorAsync(socket, sessionId, "INTERNAL_ERROR", ex.Message, jsonOptions, context.RequestAborted);
+        if (!sent)
+        {
+            logger.LogDebug("Session {SessionId} error response skipped because socket is closed", sessionId);
+        }
     }
     finally
     {
@@ -395,7 +428,7 @@ static async Task SendTtsOutputAsync(
     }
 }
 
-static async Task SendErrorAsync(
+static async Task<bool> SendErrorAsync(
     WebSocket socket,
     string sessionId,
     string code,
@@ -410,19 +443,39 @@ static async Task SendErrorAsync(
         SessionId: sessionId,
         Detail: detail);
 
-    await SendJsonAsync(socket, msg, jsonOptions, cancellationToken);
+    return await SendJsonAsync(socket, msg, jsonOptions, cancellationToken);
 }
 
-static async Task SendJsonAsync(WebSocket socket, object message, JsonSerializerOptions options, CancellationToken cancellationToken)
+static async Task<bool> SendJsonAsync(WebSocket socket, object message, JsonSerializerOptions options, CancellationToken cancellationToken)
 {
     if (socket.State != WebSocketState.Open)
     {
-        return;
+        return false;
     }
 
     var json = JsonSerializer.Serialize(message, options);
     var buffer = Encoding.UTF8.GetBytes(json);
-    await socket.SendAsync(buffer, WebSocketMessageType.Text, true, cancellationToken);
+    try
+    {
+        await socket.SendAsync(buffer, WebSocketMessageType.Text, true, cancellationToken);
+        return true;
+    }
+    catch (OperationCanceledException)
+    {
+        throw;
+    }
+    catch (IOException)
+    {
+        return false;
+    }
+    catch (ObjectDisposedException)
+    {
+        return false;
+    }
+    catch (WebSocketException)
+    {
+        return false;
+    }
 }
 
 static async Task<SocketMessage?> ReceiveMessageAsync(WebSocket socket, CancellationToken cancellationToken)
