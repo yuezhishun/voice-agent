@@ -76,6 +76,7 @@ public sealed class KokoroTtsOptions
 {
     public string ModelDir { get; set; } = "models/kokoro-v1.0";
     public string? Lexicon { get; set; }
+    public string Lang { get; set; } = "zh";
     public string Provider { get; set; } = "cpu";
     public int NumThreads { get; set; } = 2;
     public float Speed { get; set; } = 1.0f;

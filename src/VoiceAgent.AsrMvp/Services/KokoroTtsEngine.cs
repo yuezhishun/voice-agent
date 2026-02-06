@@ -38,10 +38,8 @@ public sealed class KokoroTtsEngine : ITtsEngine, IDisposable
         config.Model.Kokoro.Tokens = tokens;
         config.Model.Kokoro.DataDir = dataDir;
         config.Model.Kokoro.DictDir = dictDir;
-        if (!string.IsNullOrWhiteSpace(_options.Lexicon))
-        {
-            config.Model.Kokoro.Lexicon = ResolveOptionalPath(modelDir, _options.Lexicon);
-        }
+        config.Model.Kokoro.Lang = string.IsNullOrWhiteSpace(_options.Lang) ? "zh" : _options.Lang;
+        config.Model.Kokoro.Lexicon = ResolveLexicon(modelDir, _options.Lexicon);
 
         _tts = new OfflineTts(config);
     }
@@ -148,13 +146,63 @@ public sealed class KokoroTtsEngine : ITtsEngine, IDisposable
 
     private static string ResolveOptionalPath(string modelDir, string rawPath)
     {
-        var candidate = Path.IsPathRooted(rawPath) ? rawPath : Path.Combine(modelDir, rawPath);
+        if (Path.IsPathRooted(rawPath))
+        {
+            if (File.Exists(rawPath))
+            {
+                return rawPath;
+            }
+
+            throw new FileNotFoundException($"Kokoro lexicon not found: {rawPath}");
+        }
+
+        if (File.Exists(rawPath))
+        {
+            return Path.GetFullPath(rawPath);
+        }
+
+        var candidate = Path.Combine(modelDir, rawPath);
         if (File.Exists(candidate))
         {
             return candidate;
         }
 
         throw new FileNotFoundException($"Kokoro lexicon not found: {candidate}");
+    }
+
+    private static string ResolveLexicon(string modelDir, string? configuredLexicon)
+    {
+        if (!string.IsNullOrWhiteSpace(configuredLexicon))
+        {
+            return ResolveOptionalPath(modelDir, configuredLexicon);
+        }
+
+        // For sherpa Kokoro multi-lang v1.0 model packs.
+        var known = new[]
+        {
+            "lexicon-zh.txt",
+            "lexicon-us-en.txt",
+            "lexicon-gb-en.txt"
+        };
+
+        foreach (var name in known)
+        {
+            var p = Path.Combine(modelDir, name);
+            if (File.Exists(p))
+            {
+                return p;
+            }
+        }
+
+        var anyLexicon = Directory.EnumerateFiles(modelDir, "lexicon*.txt", SearchOption.TopDirectoryOnly)
+            .OrderBy(x => x)
+            .FirstOrDefault();
+        if (!string.IsNullOrWhiteSpace(anyLexicon))
+        {
+            return anyLexicon;
+        }
+
+        throw new FileNotFoundException($"No Kokoro lexicon found in {modelDir}");
     }
 
     private static byte[] FloatSamplesToPcm16Bytes(IntPtr ptr, int sampleCount)
