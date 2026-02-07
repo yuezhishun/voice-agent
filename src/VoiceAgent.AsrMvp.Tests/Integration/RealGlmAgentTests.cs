@@ -9,8 +9,8 @@ public sealed class RealGlmAgentTests
     [Fact]
     public async Task OpenAiCompatibleAgent_CanCallRealGlm_WhenConfigured()
     {
-        var apiKey = Environment.GetEnvironmentVariable("GLM_API_KEY");
-        if (string.IsNullOrWhiteSpace(apiKey))
+        var settings = RealIntegrationTestSettings.Load();
+        if (!settings.Enabled || string.IsNullOrWhiteSpace(settings.Glm.ApiKey))
         {
             return;
         }
@@ -24,9 +24,9 @@ public sealed class RealGlmAgentTests
                 SystemPrompt = "You are a concise assistant. Reply in one short sentence.",
                 OpenAiCompatible = new OpenAiCompatibleAgentOptions
                 {
-                    BaseUrl = Environment.GetEnvironmentVariable("GLM_API_BASE_URL") ?? "https://open.bigmodel.cn/api/paas/v4/",
-                    ApiKey = apiKey,
-                    Model = Environment.GetEnvironmentVariable("GLM_MODEL") ?? "glm-4.7",
+                    BaseUrl = settings.Glm.BaseUrl,
+                    ApiKey = settings.Glm.ApiKey,
+                    Model = settings.Glm.Model,
                     Temperature = 0.2f,
                     MaxTokens = 128
                 }

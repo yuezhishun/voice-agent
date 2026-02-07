@@ -10,8 +10,8 @@ public sealed class FunAsrWebSocketSmokeTests
     [Fact]
     public async Task FunAsrWebSocketProvider_CanProcessSpeechFile_WhenServerConfigured()
     {
-        var url = Environment.GetEnvironmentVariable("FUNASR_WS_URL");
-        if (string.IsNullOrWhiteSpace(url))
+        var settings = RealIntegrationTestSettings.Load();
+        if (!settings.Enabled || string.IsNullOrWhiteSpace(settings.FunAsrWebSocketUrl))
         {
             return;
         }
@@ -21,7 +21,7 @@ public sealed class FunAsrWebSocketSmokeTests
             AsrProvider = "funasr",
             FunAsrWebSocket = new FunAsrWebSocketOptions
             {
-                Url = url,
+                Url = settings.FunAsrWebSocketUrl,
                 Mode = "online",
                 FinalTimeoutMs = 8000,
                 ReceiveTimeoutMs = 500

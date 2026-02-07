@@ -1,0 +1,18 @@
+{
+  "RealIntegration": {
+    "Enabled": false,
+    "FunAsrWebSocketUrl": "ws://127.0.0.1:10095",
+    "RealWavDir": "src/VoiceAgent.AsrMvp.Tests/TestAssets/librispeech-dev-clean-2-200/audio",
+    "E2eWavFile": "src/VoiceAgent.AsrMvp.Tests/TestAssets/librispeech-dev-clean-2-200/audio/dev-clean-2-0001.wav",
+    "ParaformerModelDir": "models/paraformer-online-onnx",
+    "KokoroModelDir": "models/kokoro-multi-lang-v1_0",
+    "SenseVoiceModelDir": "models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17",
+    "KokoroLang": "zh",
+    "KokoroLexicon": "lexicon-zh.txt",
+    "Glm": {
+      "BaseUrl": "https://open.bigmodel.cn/api/paas/v4/",
+      "ApiKey": "<your_api_key>",
+      "Model": "glm-4.7"
+    }
+  }
+}

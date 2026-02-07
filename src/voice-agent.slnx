@@ -1,0 +1,6 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="VoiceAgent.AsrMvp.Tests/VoiceAgent.AsrMvp.Tests.csproj" />
+    <Project Path="VoiceAgent.AsrMvp/VoiceAgent.AsrMvp.csproj" />
+  </Folder>
+</Solution>

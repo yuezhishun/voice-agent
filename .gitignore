@@ -9,3 +9,7 @@
 # Test output
 TestResults/
 coverage/
+
+# Local runtime/test config with secrets or machine-specific paths
+src/VoiceAgent.AsrMvp/appsettings.Local.json
+src/VoiceAgent.AsrMvp.Tests/real-integration.settings.json

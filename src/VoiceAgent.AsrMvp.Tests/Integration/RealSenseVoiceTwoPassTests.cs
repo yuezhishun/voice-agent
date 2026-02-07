@@ -11,13 +11,10 @@ public sealed class RealSenseVoiceTwoPassTests
     [Fact]
     public async Task SenseVoiceTwoPassRefiner_CanRefine_WhenModelProvided()
     {
-        var modelDir = Environment.GetEnvironmentVariable("REAL_SENSEVOICE_MODEL_DIR");
-        if (string.IsNullOrWhiteSpace(modelDir))
-        {
-            modelDir = Path.GetFullPath("models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17");
-        }
+        var settings = RealIntegrationTestSettings.Load();
+        var modelDir = settings.SenseVoiceModelDir;
 
-        if (!Directory.Exists(modelDir))
+        if (!settings.Enabled || string.IsNullOrWhiteSpace(modelDir) || !Directory.Exists(modelDir))
         {
             return;
         }

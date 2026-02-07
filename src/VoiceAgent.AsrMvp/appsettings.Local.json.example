@@ -1,0 +1,31 @@
+{
+  "AsrMvp": {
+    "AsrProvider": "manyspeech",
+    "ManySpeechParaformer": {
+      "ModelDir": "models/paraformer-online-onnx"
+    },
+    "Agent": {
+      "Provider": "openai",
+      "OpenAiCompatible": {
+        "BaseUrl": "https://open.bigmodel.cn/api/paas/v4/",
+        "ApiKey": "<your_api_key>",
+        "Model": "glm-4.7"
+      }
+    },
+    "Tts": {
+      "Provider": "kokoro",
+      "Kokoro": {
+        "ModelDir": "models/kokoro-multi-lang-v1_0",
+        "Lang": "zh",
+        "Lexicon": "lexicon-zh.txt"
+      }
+    },
+    "TwoPass": {
+      "Enabled": true,
+      "Provider": "sensevoice",
+      "SenseVoice": {
+        "ModelDir": "models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17"
+      }
+    }
+  }
+}

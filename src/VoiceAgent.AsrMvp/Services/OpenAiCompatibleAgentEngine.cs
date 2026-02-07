@@ -27,15 +27,15 @@ public sealed class OpenAiCompatibleAgentEngine : IAgentEngine
         string userText,
         CancellationToken cancellationToken)
     {
-        var apiKey = ResolveApiKey(_options);
+        var apiKey = _options.ApiKey;
         if (string.IsNullOrWhiteSpace(apiKey))
         {
-            throw new InvalidOperationException("Agent API key is not configured. Set AsrMvp:Agent:OpenAiCompatible:ApiKey or GLM_API_KEY.");
+            throw new InvalidOperationException("Agent API key is not configured. Set AsrMvp:Agent:OpenAiCompatible:ApiKey in configuration.");
         }
 
-        var baseUrl = ResolveBaseUrl(_options);
+        var baseUrl = _options.BaseUrl;
         var requestUri = BuildChatCompletionsUri(baseUrl);
-        var model = ResolveModel(_options);
+        var model = _options.Model;
         var messages = BuildMessages(systemPrompt, history, userText);
         var payload = new ChatCompletionRequest(model, messages, _options.Temperature, _options.MaxTokens);
 
@@ -63,39 +63,6 @@ public sealed class OpenAiCompatibleAgentEngine : IAgentEngine
         }
 
         return text;
-    }
-
-    private static string ResolveApiKey(OpenAiCompatibleAgentOptions options)
-    {
-        var env = Environment.GetEnvironmentVariable("GLM_API_KEY");
-        if (!string.IsNullOrWhiteSpace(env))
-        {
-            return env;
-        }
-
-        return options.ApiKey;
-    }
-
-    private static string ResolveBaseUrl(OpenAiCompatibleAgentOptions options)
-    {
-        var env = Environment.GetEnvironmentVariable("GLM_API_BASE_URL");
-        if (!string.IsNullOrWhiteSpace(env))
-        {
-            return env;
-        }
-
-        return options.BaseUrl;
-    }
-
-    private static string ResolveModel(OpenAiCompatibleAgentOptions options)
-    {
-        var env = Environment.GetEnvironmentVariable("GLM_MODEL");
-        if (!string.IsNullOrWhiteSpace(env))
-        {
-            return env;
-        }
-
-        return options.Model;
     }
 
     private static string BuildChatCompletionsUri(string baseUrl)

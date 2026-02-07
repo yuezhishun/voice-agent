@@ -14,6 +14,12 @@ This is the phase-1 MVP service for real-time transcription.
 - `agent.response` event triggered by each `stt.final`
 - `tts.start/chunk/stop` events plus binary PCM16 audio chunks
 - `listen.stop` text control to force finalization
+- Runtime profile + resilience config (`dev/test/prod`, timeout/retry/circuit-breaker)
+- Structured dependency health details (`/healthz`)
+- Unified error payload (`traceId` + `error.stage` + `error.code`)
+- Dynamic endpointing profile (`quiet/noisy`)
+- TTS interrupt event when user speaks during playback
+- Alert endpoint (`/alerts`) and release/rollback view (`/releasez`)
 
 ## Run
 ```bash
@@ -36,15 +42,13 @@ To use real GLM agent (OpenAI-compatible API), set:
 - `AsrMvp:Agent:Provider=openai`
 - `AsrMvp:Agent:OpenAiCompatible:BaseUrl=https://open.bigmodel.cn/api/paas/v4/`
 - `AsrMvp:Agent:OpenAiCompatible:Model=glm-4.7`
-- API key from env `GLM_API_KEY` (recommended) or config `AsrMvp:Agent:OpenAiCompatible:ApiKey`
+- `AsrMvp:Agent:OpenAiCompatible:ApiKey=<your_api_key>`
 
 Example:
 ```bash
-export GLM_API_KEY=your_key
-dotnet run --project src/VoiceAgent.AsrMvp/VoiceAgent.AsrMvp.csproj \
-  --urls http://127.0.0.1:5079 \
-  --AsrMvp:Agent:Provider=openai \
-  --AsrMvp:Agent:OpenAiCompatible:Model=glm-4.7
+cp src/VoiceAgent.AsrMvp/appsettings.Local.json.example src/VoiceAgent.AsrMvp/appsettings.Local.json
+# edit appsettings.Local.json, then run
+dotnet run --project src/VoiceAgent.AsrMvp/VoiceAgent.AsrMvp.csproj --urls http://127.0.0.1:5079
 ```
 
 To use local Kokoro TTS instead of mock, set:
@@ -62,11 +66,25 @@ Kokoro model directory should include:
 ```bash
 curl http://127.0.0.1:5079/healthz
 ```
+`/healthz` returns per-stage checks for `asr/agent/tts` and reports `503 degraded` when any real dependency is unhealthy.
 
 ## Metrics
 ```bash
 curl http://127.0.0.1:5079/metrics
 ```
+`/metrics` includes stage-level success/failure/error-rate and latency stats (avg/p95).
+
+## Alerts
+```bash
+curl http://127.0.0.1:5079/alerts
+```
+`/alerts` evaluates error-rate/latency/dependency rules and returns active alerts.
+
+## Release
+```bash
+curl http://127.0.0.1:5079/releasez
+```
+Use `AsrMvp:Release:ForceMockAsr|ForceMockAgent|ForceMockTts=true` to force degrade/rollback per stage.
 
 ## WebSocket
 - URL: `ws://127.0.0.1:5079/ws/stt`
@@ -75,59 +93,111 @@ curl http://127.0.0.1:5079/metrics
   - Text (optional): `{"type":"listen","state":"stop","sessionId":"..."}`
 - Output examples:
 ```json
-{"type":"stt","state":"partial","text":"...","segmentId":"seg-1","sessionId":"...","startMs":0,"endMs":320}
+{"type":"stt","state":"partial","text":"...","segmentId":"seg-1","sessionId":"...","startMs":0,"endMs":320,"traceId":"...","latencyMs":{"stt":78}}
 ```
 ```json
-{"type":"stt","state":"final","text":"...","segmentId":"seg-1","sessionId":"...","startMs":0,"endMs":2560}
+{"type":"stt","state":"final","text":"...","segmentId":"seg-1","sessionId":"...","startMs":0,"endMs":2560,"traceId":"...","finalReason":"endpointing|max_segment|listen_stop","latencyMs":{"stt":125}}
+```
+```json
+{"type":"stt","state":"error","sessionId":"...","traceId":"...","error":{"stage":"agent","code":"AGENT_TIMEOUT","detail":"request timed out"}}
 ```
 ```json
 {"type":"agent","state":"response","text":"...","sessionId":"...","segmentId":"seg-1"}
 ```
 ```json
-{"type":"tts","state":"start","sessionId":"...","segmentId":"seg-1","sampleRate":16000,"sequence":0}
+{"type":"tts","state":"start","sessionId":"...","segmentId":"seg-1","sampleRate":16000,"sequence":0,"traceId":"..."}
+```
+```json
+{"type":"interrupt","state":"stop","sessionId":"...","segmentId":"seg-1","reason":"user_speech","atMs":1738890000000,"traceId":"..."}
 ```
 Binary websocket frames after `tts.start` are PCM16 audio chunks, followed by:
 ```json
-{"type":"tts","state":"stop","sessionId":"...","segmentId":"seg-1","sampleRate":16000,"sequence":N}
+{"type":"tts","state":"stop","sessionId":"...","segmentId":"seg-1","sampleRate":16000,"sequence":N,"traceId":"..."}
 ```
+
+## Runtime Profile / Resilience
+Default profile is `AsrMvp:RuntimeProfile=dev`.
+
+Environment-layer templates:
+- `src/VoiceAgent.AsrMvp/appsettings.Development.json`
+- `src/VoiceAgent.AsrMvp/appsettings.Test.json`
+- `src/VoiceAgent.AsrMvp/appsettings.Production.json`
+- Optional local override (loaded automatically): `src/VoiceAgent.AsrMvp/appsettings.Local.json`
+
+Example:
+```bash
+dotnet run --project src/VoiceAgent.AsrMvp/VoiceAgent.AsrMvp.csproj \
+  --environment Production \
+  --AsrMvp:RuntimeProfile=prod \
+  --AsrMvp:Resilience:Asr:TimeoutMs=2500 \
+  --AsrMvp:Resilience:Agent:RetryCount=1 \
+  --AsrMvp:Fallback:EnableOnAgentFailure=true
+```
+
+## M2 Tuning
+- `AsrMvp:Endpointing:DynamicProfileEnabled`
+- `AsrMvp:Endpointing:QuietProfile:*`
+- `AsrMvp:Endpointing:NoisyProfile:*`
+- `AsrMvp:TranscriptStability:*`
+- `AsrMvp:TwoPass:Trigger:*`
 
 ## File-based ASR tests
 WAV fixtures are under `src/VoiceAgent.AsrMvp.Tests/TestAssets/`.
 
 - `speech_then_silence.wav`: should produce at least one final ASR result.
 - `silence.wav`: should produce no final result.
+- scenario manifest sample: `src/VoiceAgent.AsrMvp.Tests/TestAssets/datasets/scenario_manifest.sample.json`
 
-Optional real-server smoke test:
-- set env `FUNASR_WS_URL` then run tests; `FunAsrWebSocketSmokeTests` will call the real websocket server.
+Generate a fixed 200-file dev-clean-2 sample set (one command):
+```bash
+bash scripts/generate_dev_clean_2_sample.sh
+```
+Output:
+- `src/VoiceAgent.AsrMvp.Tests/TestAssets/librispeech-dev-clean-2-200/audio/*.wav`
+- `src/VoiceAgent.AsrMvp.Tests/TestAssets/librispeech-dev-clean-2-200/manifest.tsv`
+
+End-to-end scenario matrix (mock + fault injection):
+```bash
+dotnet test src/VoiceAgent.AsrMvp.Tests/VoiceAgent.AsrMvp.Tests.csproj --filter EndToEndScenarioMatrixTests
+```
+This matrix verifies:
+- happy path: `stt.final -> agent.response -> tts.start/chunk/stop`
+- ASR failure: standardized `stt.error` (`stage=asr`)
+- Agent failure: fallback response + TTS output
+- TTS failure: standardized `stt.error` (`stage=tts`)
+
+Real integration tests use config file:
+
+```bash
+cp src/VoiceAgent.AsrMvp.Tests/real-integration.settings.json.example src/VoiceAgent.AsrMvp.Tests/real-integration.settings.json
+# set RealIntegration.Enabled=true and fill paths/apiKey
+```
+
+Optional real-server smoke test (`FunAsrWebSocketSmokeTests`):
+
+```bash
+dotnet test src/VoiceAgent.AsrMvp.Tests/VoiceAgent.AsrMvp.Tests.csproj --filter FunAsrWebSocketSmokeTests
+```
 
 Batch real wav regression with real FunASR server:
 ```bash
-export FUNASR_WS_URL=ws://127.0.0.1:10095
-export REAL_WAV_DIR=/path/to/your/wav_dir
 dotnet test src/VoiceAgent.AsrMvp.Tests/VoiceAgent.AsrMvp.Tests.csproj --filter RealWavBatchTests
 ```
 Per-file report is written to `/tmp/voice-agent-reports/real_wav_asr_report_*.txt`.
 
 Batch real wav regression with local ManySpeech Paraformer:
 ```bash
-export REAL_WAV_DIR=/path/to/your/wav_dir
-export REAL_PARAFORMER_MODEL_DIR=/home/yueyuan/voice-agent/models/paraformer-online-onnx
 dotnet test src/VoiceAgent.AsrMvp.Tests/VoiceAgent.AsrMvp.Tests.csproj --filter RealWavBatchManySpeechTests
 ```
 Per-file report is written to `/tmp/voice-agent-reports/real_wav_asr_manyspeech_report_*.txt`.
 
 Optional real Kokoro TTS test:
 ```bash
-export KOKORO_MODEL_DIR=/path/to/kokoro-v1.0
 dotnet test src/VoiceAgent.AsrMvp.Tests/VoiceAgent.AsrMvp.Tests.csproj --filter RealKokoroTtsTests
 ```
 
 Optional real end-to-end test (ManySpeech ASR + GLM Agent + Kokoro TTS):
 ```bash
-export REAL_E2E_WAV_FILE=/path/to/16k_pcm16_mono.wav
-export REAL_PARAFORMER_MODEL_DIR=/home/yueyuan/voice-agent/models/paraformer-online-onnx
-export KOKORO_MODEL_DIR=/home/yueyuan/voice-agent/models/kokoro-multi-lang-v1_0
-export GLM_API_KEY=your_key
 dotnet test src/VoiceAgent.AsrMvp.Tests/VoiceAgent.AsrMvp.Tests.csproj --filter RealEndToEndFlowTests
 ```
 
@@ -151,6 +221,5 @@ tar -xjf sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2
 
 Optional real 2-pass test:
 ```bash
-export REAL_SENSEVOICE_MODEL_DIR=/home/yueyuan/voice-agent/models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17
 dotnet test src/VoiceAgent.AsrMvp.Tests/VoiceAgent.AsrMvp.Tests.csproj --filter RealSenseVoiceTwoPassTests
 ```

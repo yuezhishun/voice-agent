@@ -49,13 +49,14 @@ public sealed class WebSocketFlowTests : IClassFixture<WebApplicationFactory<Pro
 
         var partial = 0;
         var final = 0;
+        var finalReasonOk = false;
         var agent = 0;
         var ttsStart = 0;
         var ttsStop = 0;
         var ttsBinary = 0;
 
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(8));
-        for (var i = 0; i < 40; i++)
+        for (var i = 0; i < 80; i++)
         {
             var buffer = new byte[8192];
             var result = await ws.ReceiveAsync(buffer, timeout.Token);
@@ -78,6 +79,8 @@ public sealed class WebSocketFlowTests : IClassFixture<WebApplicationFactory<Pro
             if (text.Contains("\"state\":\"final\"", StringComparison.Ordinal))
             {
                 final++;
+                finalReasonOk = text.Contains("\"finalReason\":\"endpointing\"", StringComparison.Ordinal) ||
+                                text.Contains("\"finalReason\":\"max_segment\"", StringComparison.Ordinal);
             }
 
             if (text.Contains("\"type\":\"agent\"", StringComparison.Ordinal) &&
@@ -106,6 +109,7 @@ public sealed class WebSocketFlowTests : IClassFixture<WebApplicationFactory<Pro
 
         Assert.True(partial >= 1, "Expected at least one partial message.");
         Assert.True(final >= 1, "Expected one final message.");
+        Assert.True(finalReasonOk, "Expected finalReason endpointing|max_segment.");
         Assert.True(agent >= 1, "Expected one agent response message.");
         Assert.True(ttsStart >= 1, "Expected tts start message.");
         Assert.True(ttsBinary >= 1, "Expected at least one binary tts chunk.");

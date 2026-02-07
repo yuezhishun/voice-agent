@@ -8,5 +8,8 @@ public sealed class EndpointingDecision
     public int SegmentDurationMs { get; init; }
     public long SegmentStartMs { get; init; }
     public long SegmentEndMs { get; init; }
+    public int TrailingSilenceMs { get; init; }
+    public string FinalReason { get; init; } = "endpointing";
+    public string EndpointingProfile { get; init; } = "quiet";
     public float[]? FinalSegmentSamples { get; init; }
 }

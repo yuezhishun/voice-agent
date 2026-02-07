@@ -10,15 +10,15 @@ public sealed class RealKokoroTtsTests
     [Fact]
     public async Task Kokoro_CanSynthesize_WhenModelDirectoryProvided()
     {
-        var modelDir = Environment.GetEnvironmentVariable("KOKORO_MODEL_DIR");
-        if (string.IsNullOrWhiteSpace(modelDir))
+        var settings = RealIntegrationTestSettings.Load();
+        if (!settings.Enabled || string.IsNullOrWhiteSpace(settings.KokoroModelDir))
         {
             return;
         }
 
-        if (!Directory.Exists(modelDir))
+        if (!Directory.Exists(settings.KokoroModelDir))
         {
-            throw new DirectoryNotFoundException($"KOKORO_MODEL_DIR not found: {modelDir}");
+            throw new DirectoryNotFoundException($"RealIntegration:KokoroModelDir not found: {settings.KokoroModelDir}");
         }
 
         var options = Options.Create(new AsrMvpOptions
@@ -30,7 +30,9 @@ public sealed class RealKokoroTtsTests
                 ChunkDurationMs = 200,
                 Kokoro = new KokoroTtsOptions
                 {
-                    ModelDir = modelDir
+                    ModelDir = settings.KokoroModelDir,
+                    Lang = settings.KokoroLang,
+                    Lexicon = settings.KokoroLexicon
                 }
             }
         });

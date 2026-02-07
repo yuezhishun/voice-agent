@@ -10,30 +10,29 @@ public sealed class RealWavBatchManySpeechTests
     [Fact]
     public async Task ManySpeechProvider_CanProcessRealWavDirectory_WhenConfigured()
     {
-        var wavDir = Environment.GetEnvironmentVariable("REAL_WAV_DIR");
-        if (string.IsNullOrWhiteSpace(wavDir))
+        var settings = RealIntegrationTestSettings.Load();
+        if (!settings.Enabled || string.IsNullOrWhiteSpace(settings.RealWavDir))
         {
             return;
         }
 
-        if (!Directory.Exists(wavDir))
+        if (!Directory.Exists(settings.RealWavDir))
         {
-            throw new DirectoryNotFoundException($"REAL_WAV_DIR not found: {wavDir}");
+            throw new DirectoryNotFoundException($"RealIntegration:RealWavDir not found: {settings.RealWavDir}");
         }
 
-        var modelDir = Environment.GetEnvironmentVariable("REAL_PARAFORMER_MODEL_DIR");
-        if (string.IsNullOrWhiteSpace(modelDir))
+        if (string.IsNullOrWhiteSpace(settings.ParaformerModelDir))
         {
-            modelDir = Path.GetFullPath("models/paraformer-online-onnx");
+            return;
         }
 
-        if (!Directory.Exists(modelDir))
+        if (!Directory.Exists(settings.ParaformerModelDir))
         {
-            throw new DirectoryNotFoundException($"Model directory not found: {modelDir}");
+            throw new DirectoryNotFoundException($"RealIntegration:ParaformerModelDir not found: {settings.ParaformerModelDir}");
         }
 
         var wavFiles = Directory
-            .EnumerateFiles(wavDir, "*.wav", SearchOption.AllDirectories)
+            .EnumerateFiles(settings.RealWavDir, "*.wav", SearchOption.AllDirectories)
             .OrderBy(x => x)
             .ToArray();
 
@@ -44,7 +43,7 @@ public sealed class RealWavBatchManySpeechTests
             AsrProvider = "manyspeech",
             ManySpeechParaformer = new ManySpeechParaformerOptions
             {
-                ModelDir = modelDir,
+                ModelDir = settings.ParaformerModelDir,
                 Threads = 2,
                 AutoGenerateTokensTxt = true
             }

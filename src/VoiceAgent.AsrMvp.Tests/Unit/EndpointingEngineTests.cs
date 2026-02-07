@@ -21,7 +21,7 @@ public sealed class EndpointingEngineTests
 
         for (var i = 0; i < 4; i++)
         {
-            var decision = engine.Process(session, SpeechChunk, speech: true, chunkMs: 320, nowMs: now);
+            var decision = engine.Process(session, SpeechChunk, speech: true, chunkMs: 320, nowMs: now, frameRms: 0.03f);
             Assert.False(decision.ShouldFinalize);
             now += 320;
         }
@@ -29,11 +29,12 @@ public sealed class EndpointingEngineTests
         EndpointingDecision last = new();
         for (var i = 0; i < 3; i++)
         {
-            last = engine.Process(session, SilenceChunk, speech: false, chunkMs: 320, nowMs: now);
+            last = engine.Process(session, SilenceChunk, speech: false, chunkMs: 320, nowMs: now, frameRms: 0.0f);
             now += 320;
         }
 
         Assert.True(last.ShouldFinalize);
+        Assert.Equal("endpointing", last.FinalReason);
         Assert.NotNull(last.FinalSegmentSamples);
         Assert.NotEmpty(last.FinalSegmentSamples!);
     }
@@ -50,7 +51,7 @@ public sealed class EndpointingEngineTests
 
         for (var i = 0; i < 50; i++)
         {
-            last = engine.Process(session, SpeechChunk, speech: true, chunkMs: 320, nowMs: now);
+            last = engine.Process(session, SpeechChunk, speech: true, chunkMs: 320, nowMs: now, frameRms: 0.03f);
             now += 320;
             if (last.ShouldFinalize)
             {
@@ -59,7 +60,27 @@ public sealed class EndpointingEngineTests
         }
 
         Assert.True(last.ShouldFinalize);
+        Assert.Equal("max_segment", last.FinalReason);
         Assert.NotNull(last.FinalSegmentSamples);
         Assert.NotEmpty(last.FinalSegmentSamples!);
+    }
+
+    [Fact]
+    public void SwitchesToNoisyProfileWhenNoisePersists()
+    {
+        var options = Options.Create(new AsrMvpOptions());
+        var engine = new EndpointingEngine(options);
+        var session = new SessionContext("s-3");
+
+        var now = 0L;
+        for (var i = 0; i < 20; i++)
+        {
+            var decision = engine.Process(session, SilenceChunk, speech: false, chunkMs: 320, nowMs: now, frameRms: 0.04f);
+            now += 320;
+            if (i == 19)
+            {
+                Assert.Equal("noisy", decision.EndpointingProfile);
+            }
+        }
     }
 }

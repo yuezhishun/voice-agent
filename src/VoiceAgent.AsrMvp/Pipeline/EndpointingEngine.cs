@@ -13,9 +13,11 @@ public sealed class EndpointingEngine
         _options = options.Value.Endpointing;
     }
 
-    public EndpointingDecision Process(SessionContext session, ReadOnlySpan<float> samples, bool speech, int chunkMs, long nowMs)
+    public EndpointingDecision Process(SessionContext session, ReadOnlySpan<float> samples, bool speech, int chunkMs, long nowMs, float frameRms = 0f)
     {
         var state = session.Endpointing;
+        UpdateProfile(state, speech, frameRms);
+        var profile = GetActiveProfile(state);
 
         if (!state.InSpeech && !speech)
         {
@@ -24,7 +26,8 @@ public sealed class EndpointingEngine
                 ShouldAppendAudio = false,
                 ShouldFinalize = false,
                 InSpeech = false,
-                SegmentDurationMs = 0
+                SegmentDurationMs = 0,
+                EndpointingProfile = state.ActiveProfile
             };
         }
 
@@ -46,7 +49,7 @@ public sealed class EndpointingEngine
             {
                 state.SpeechMs += chunkMs;
                 state.SilenceMs = 0;
-                if (state.PendingFinalize && state.PendingFinalizeMs <= _options.MergeBackMs)
+                if (state.PendingFinalize && state.PendingFinalizeMs <= profile.MergeBackMs)
                 {
                     state.PendingFinalize = false;
                     state.PendingFinalizeMs = 0;
@@ -55,7 +58,7 @@ public sealed class EndpointingEngine
             else
             {
                 state.SilenceMs += chunkMs;
-                if (state.SpeechMs >= _options.MinSegmentMs && state.SilenceMs >= _options.MinSilenceMs)
+                if (state.SpeechMs >= _options.MinSegmentMs && state.SilenceMs >= profile.MinSilenceMs)
                 {
                     state.PendingFinalize = true;
                     state.PendingFinalizeMs += chunkMs;
@@ -70,7 +73,7 @@ public sealed class EndpointingEngine
             {
                 shouldFinalize = true;
             }
-            else if (state.PendingFinalize && state.SilenceMs >= _options.EndSilenceMs)
+            else if (state.PendingFinalize && state.SilenceMs >= profile.EndSilenceMs)
             {
                 shouldFinalize = true;
             }
@@ -86,7 +89,9 @@ public sealed class EndpointingEngine
                 InSpeech = state.InSpeech,
                 SegmentDurationMs = state.SegmentDurationMs,
                 SegmentStartMs = state.SegmentStartMs,
-                SegmentEndMs = nowMs
+                SegmentEndMs = nowMs,
+                TrailingSilenceMs = state.SilenceMs,
+                EndpointingProfile = state.ActiveProfile
             };
         }
 
@@ -95,6 +100,9 @@ public sealed class EndpointingEngine
         var duration = state.SegmentDurationMs;
         var startMs = state.SegmentStartMs;
         var endMs = nowMs;
+        var finalReason = duration >= _options.MaxSegmentMs ? "max_segment" : "endpointing";
+        var trailingSilenceMs = state.SilenceMs;
+        var finalProfile = state.ActiveProfile;
 
         state.Reset();
 
@@ -106,7 +114,32 @@ public sealed class EndpointingEngine
             SegmentDurationMs = duration,
             SegmentStartMs = startMs,
             SegmentEndMs = endMs,
+            TrailingSilenceMs = trailingSilenceMs,
+            FinalReason = finalReason,
+            EndpointingProfile = finalProfile,
             FinalSegmentSamples = segment
         };
+    }
+
+    private void UpdateProfile(EndpointingState state, bool speech, float frameRms)
+    {
+        if (!_options.DynamicProfileEnabled)
+        {
+            state.ActiveProfile = "quiet";
+            return;
+        }
+
+        var noisy = !speech && frameRms >= _options.NoisyFrameRmsThreshold;
+        var target = noisy ? 1f : 0f;
+        var alpha = Math.Clamp(_options.NoisyScoreAlpha, 0f, 0.99f);
+        state.NoiseScore = (alpha * state.NoiseScore) + ((1f - alpha) * target);
+        state.ActiveProfile = state.NoiseScore >= _options.NoisyScoreThreshold ? "noisy" : "quiet";
+    }
+
+    private EndpointingProfileOptions GetActiveProfile(EndpointingState state)
+    {
+        return string.Equals(state.ActiveProfile, "noisy", StringComparison.OrdinalIgnoreCase)
+            ? _options.NoisyProfile
+            : _options.QuietProfile;
     }
 }

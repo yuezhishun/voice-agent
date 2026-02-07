@@ -1,0 +1,36 @@
+{
+  "description": "Sample manifest for end-to-end ASR/Agent/TTS drill dataset",
+  "format": "wav-16k-pcm16-mono",
+  "cases": [
+    {
+      "caseId": "quiet-001",
+      "bucket": "quiet",
+      "audioPath": "TestAssets/speech_then_silence.wav",
+      "referenceText": "你好，请介绍一下今天的天气。",
+      "expectedFinalReason": "endpointing",
+      "allowFallback": false,
+      "expectInterrupt": false,
+      "notes": "Baseline near-field sample"
+    },
+    {
+      "caseId": "interrupt-001",
+      "bucket": "interrupt",
+      "audioPath": "TestAssets/speech_then_silence.wav",
+      "referenceText": "请停止并重新开始。",
+      "expectedFinalReason": "listen_stop",
+      "allowFallback": true,
+      "expectInterrupt": true,
+      "notes": "Use with interrupt scenario test"
+    },
+    {
+      "caseId": "dependency-failure-001",
+      "bucket": "dependency-failure",
+      "audioPath": "TestAssets/speech_then_silence.wav",
+      "referenceText": "如果服务异常，请给兜底回复。",
+      "expectedFinalReason": "endpointing",
+      "allowFallback": true,
+      "expectInterrupt": false,
+      "notes": "Use with agent/tts failure injection tests"
+    }
+  ]
+}

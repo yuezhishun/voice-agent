@@ -10,21 +10,21 @@ public sealed class RealWavBatchTests
     [Fact]
     public async Task FunAsrWebSocketProvider_CanProcessRealWavDirectory_WhenConfigured()
     {
-        var url = Environment.GetEnvironmentVariable("FUNASR_WS_URL");
-        var wavDir = Environment.GetEnvironmentVariable("REAL_WAV_DIR");
-
-        if (string.IsNullOrWhiteSpace(url) || string.IsNullOrWhiteSpace(wavDir))
+        var settings = RealIntegrationTestSettings.Load();
+        if (!settings.Enabled ||
+            string.IsNullOrWhiteSpace(settings.FunAsrWebSocketUrl) ||
+            string.IsNullOrWhiteSpace(settings.RealWavDir))
         {
             return;
         }
 
-        if (!Directory.Exists(wavDir))
+        if (!Directory.Exists(settings.RealWavDir))
         {
-            throw new DirectoryNotFoundException($"REAL_WAV_DIR not found: {wavDir}");
+            throw new DirectoryNotFoundException($"RealIntegration:RealWavDir not found: {settings.RealWavDir}");
         }
 
         var wavFiles = Directory
-            .EnumerateFiles(wavDir, "*.wav", SearchOption.AllDirectories)
+            .EnumerateFiles(settings.RealWavDir, "*.wav", SearchOption.AllDirectories)
             .OrderBy(x => x)
             .ToArray();
 
@@ -35,7 +35,7 @@ public sealed class RealWavBatchTests
             AsrProvider = "funasr",
             FunAsrWebSocket = new FunAsrWebSocketOptions
             {
-                Url = url,
+                Url = settings.FunAsrWebSocketUrl,
                 Mode = "online",
                 FinalTimeoutMs = 12000,
                 ReceiveTimeoutMs = 800

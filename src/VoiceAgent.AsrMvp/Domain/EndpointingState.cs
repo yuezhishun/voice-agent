@@ -9,6 +9,8 @@ public sealed class EndpointingState
     public int SilenceMs { get; set; }
     public int PendingFinalizeMs { get; set; }
     public long SegmentStartMs { get; set; }
+    public float NoiseScore { get; set; }
+    public string ActiveProfile { get; set; } = "quiet";
 
     public void Reset()
     {
@@ -19,5 +21,7 @@ public sealed class EndpointingState
         SilenceMs = 0;
         PendingFinalizeMs = 0;
         SegmentStartMs = 0;
+        NoiseScore = 0;
+        ActiveProfile = "quiet";
     }
 }

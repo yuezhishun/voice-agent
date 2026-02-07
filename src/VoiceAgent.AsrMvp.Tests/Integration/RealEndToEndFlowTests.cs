@@ -19,7 +19,13 @@ public sealed class RealEndToEndFlowTests : IClassFixture<WebApplicationFactory<
     [Fact]
     public async Task RealManySpeechGlmKokoro_CanCompleteEndToEndFlow_WhenConfigured()
     {
-        var wavPath = Environment.GetEnvironmentVariable("REAL_E2E_WAV_FILE");
+        var settings = RealIntegrationTestSettings.Load();
+        if (!settings.Enabled)
+        {
+            return;
+        }
+
+        var wavPath = settings.E2eWavFile;
         if (string.IsNullOrWhiteSpace(wavPath))
         {
             return;
@@ -27,35 +33,25 @@ public sealed class RealEndToEndFlowTests : IClassFixture<WebApplicationFactory<
 
         if (!File.Exists(wavPath))
         {
-            throw new FileNotFoundException($"REAL_E2E_WAV_FILE not found: {wavPath}");
+            throw new FileNotFoundException($"RealIntegration:E2eWavFile not found: {wavPath}");
         }
 
-        var glmApiKey = Environment.GetEnvironmentVariable("GLM_API_KEY");
-        if (string.IsNullOrWhiteSpace(glmApiKey))
+        if (string.IsNullOrWhiteSpace(settings.Glm.ApiKey))
         {
-            throw new InvalidOperationException("GLM_API_KEY is required for RealEndToEndFlowTests.");
+            throw new InvalidOperationException("RealIntegration:Glm:ApiKey is required for RealEndToEndFlowTests.");
         }
 
-        var paraformerDir = Environment.GetEnvironmentVariable("REAL_PARAFORMER_MODEL_DIR");
-        if (string.IsNullOrWhiteSpace(paraformerDir))
-        {
-            paraformerDir = Path.GetFullPath("models/paraformer-online-onnx");
-        }
-
-        var kokoroDir = Environment.GetEnvironmentVariable("KOKORO_MODEL_DIR");
-        if (string.IsNullOrWhiteSpace(kokoroDir))
-        {
-            kokoroDir = Path.GetFullPath("models/kokoro-multi-lang-v1_0");
-        }
+        var paraformerDir = settings.ParaformerModelDir;
+        var kokoroDir = settings.KokoroModelDir;
 
         if (!Directory.Exists(paraformerDir))
         {
-            throw new DirectoryNotFoundException($"REAL_PARAFORMER_MODEL_DIR not found: {paraformerDir}");
+            throw new DirectoryNotFoundException($"RealIntegration:ParaformerModelDir not found: {paraformerDir}");
         }
 
         if (!Directory.Exists(kokoroDir))
         {
-            throw new DirectoryNotFoundException($"KOKORO_MODEL_DIR not found: {kokoroDir}");
+            throw new DirectoryNotFoundException($"RealIntegration:KokoroModelDir not found: {kokoroDir}");
         }
 
         var cfg = new Dictionary<string, string?>
@@ -63,17 +59,17 @@ public sealed class RealEndToEndFlowTests : IClassFixture<WebApplicationFactory<
             ["AsrMvp:AsrProvider"] = "manyspeech",
             ["AsrMvp:ManySpeechParaformer:ModelDir"] = paraformerDir,
             ["AsrMvp:Agent:Provider"] = "openai",
-            ["AsrMvp:Agent:OpenAiCompatible:BaseUrl"] = Environment.GetEnvironmentVariable("GLM_API_BASE_URL") ?? "https://open.bigmodel.cn/api/paas/v4/",
-            ["AsrMvp:Agent:OpenAiCompatible:ApiKey"] = glmApiKey,
-            ["AsrMvp:Agent:OpenAiCompatible:Model"] = Environment.GetEnvironmentVariable("GLM_MODEL") ?? "glm-4.7",
+            ["AsrMvp:Agent:OpenAiCompatible:BaseUrl"] = settings.Glm.BaseUrl,
+            ["AsrMvp:Agent:OpenAiCompatible:ApiKey"] = settings.Glm.ApiKey,
+            ["AsrMvp:Agent:OpenAiCompatible:Model"] = settings.Glm.Model,
             ["AsrMvp:Agent:OpenAiCompatible:Temperature"] = "0.2",
             ["AsrMvp:Agent:TimeoutMs"] = "20000",
             ["AsrMvp:Tts:Provider"] = "kokoro",
             ["AsrMvp:Tts:SampleRate"] = "24000",
             ["AsrMvp:Tts:TimeoutMs"] = "20000",
             ["AsrMvp:Tts:Kokoro:ModelDir"] = kokoroDir,
-            ["AsrMvp:Tts:Kokoro:Lang"] = Environment.GetEnvironmentVariable("KOKORO_LANG") ?? "zh",
-            ["AsrMvp:Tts:Kokoro:Lexicon"] = Environment.GetEnvironmentVariable("KOKORO_LEXICON") ?? "lexicon-zh.txt"
+            ["AsrMvp:Tts:Kokoro:Lang"] = settings.KokoroLang,
+            ["AsrMvp:Tts:Kokoro:Lexicon"] = settings.KokoroLexicon
         };
 
         using var factory = _factory.WithWebHostBuilder(builder =>
@@ -87,7 +83,7 @@ public sealed class RealEndToEndFlowTests : IClassFixture<WebApplicationFactory<
         var (samples, sampleRate, channels) = WavFileReader.ReadPcm16(wavPath);
         if (sampleRate != 16000)
         {
-            throw new InvalidDataException($"REAL_E2E_WAV_FILE must be 16k PCM16. Actual sample rate: {sampleRate}");
+            throw new InvalidDataException($"RealIntegration:E2eWavFile must be 16k PCM16. Actual sample rate: {sampleRate}");
         }
 
         var mono = ToMono(samples, channels);
